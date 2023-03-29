@@ -31,13 +31,6 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    filename='main.log',
-    filemode='w',
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-
 
 def check_tokens():
     """Проверяет доступность переменных окружения, если нет хотя бы одной.
@@ -45,12 +38,7 @@ def check_tokens():
     """
     ENV_VARS = [PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID]
 
-    for var in ENV_VARS:
-        if var is None:
-            logging.critical('Ошибка! Отсутствует обязательная'
-                             f'переменная окружения: {var}.')
-            sys.exit()
-    return True
+    return all(ENV_VARS)
 
 
 def send_message(bot, message):
@@ -58,6 +46,8 @@ def send_message(bot, message):
     домашней работы.
     """
     try:
+        logging.info('Суйчас Вам будет отправлено сообщение о статусе'
+                     'проверки домашней работы')
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug('Сообщение о статусе успешно отправлено')
     except telegram.error.TelegramError:
@@ -90,7 +80,7 @@ def get_api_answer(timestamp):
 def check_response(response):
     """Проверяет ответ API-сервиса на соответствие документации."""
     if not isinstance(response, dict):
-        raise TypeError('Полученный ответ не является словарем.')
+        raise TypeError(f'Полученный ответ: {response}, не является словарем.')
 
     if 'homeworks' not in response:
         raise KeyError('Нет ключа: homeworks')
@@ -125,9 +115,13 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    check_tokens()
+    if check_tokens() is False:
+        logging.critical('Ошибка! Отсутствует обязательная'
+                         'переменная окружения.')
+        sys.exit()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
+    STATUS = HOMEWORK_VERDICTS
     while True:
         try:
             response = get_api_answer(timestamp)
@@ -135,18 +129,27 @@ def main():
             if response['homeworks']:
                 homework = response['homeworks'][0]
                 message = parse_status(homework)
-                send_message(bot, message)
+                if message != STATUS:
+                    send_message(bot, message)
+                    STATUS = message
+                    time.sleep(RETRY_PERIOD)
             else:
                 message = 'Данные не обновлялись.'
                 logging.info(message)
-                send_message(bot, message)
 
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logging.error(message)
+            send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.DEBUG,
+        filename='main.log',
+        filemode='w',
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
     main()
